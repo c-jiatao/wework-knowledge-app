@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识库查询</title>
+    <script src="https://wwopen.openstorage.cn/res/js/1.0.0/wwSdk.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+        }
+        
+        .header {
+            background: #07c160;
+            color: white;
+            padding: 16px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .search-box {
+            padding: 16px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        
+        .search-input:focus {
+            border-color: #07c160;
+        }
+        
+        .search-btn {
+            width: 100%;
+            margin-top: 8px;
+            padding: 12px;
+            background: #07c160;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .search-btn:hover {
+            background: #06ad56;
+        }
+        
+        .search-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .results {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+        
+        .result-item {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            position: relative;
+            border: 1px solid #e9ecef;
+        }
+        
+        .result-content {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+            word-wrap: break-word;
+            margin-bottom: 12px;
+        }
+        
+        .actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        
+        .action-btn {
+            padding: 6px 12px;
+            border: 1px solid #07c160;
+            background: white;
+            color: #07c160;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .action-btn:hover {
+            background: #07c160;
+            color: white;
+        }
+        
+        .send-btn {
+            background: #07c160;
+            color: white;
+        }
+        
+        .send-btn:hover {
+            background: #06ad56;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+        
+        .error {
+            background: #fff2f0;
+            border: 1px solid #ffccc7;
+            color: #ff4d4f;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 10px 16px;
+        }
+        
+        .toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            z-index: 1000;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            知识库查询
+        </div>
+        
+        <div class="search-box">
+            <input 
+                type="text" 
+                class="search-input" 
+                placeholder="请输入您要查询的问题..."
+                id="searchInput"
+            >
+            <button class="search-btn" id="searchBtn">搜索</button>
+        </div>
+        
+        <div class="results" id="results">
+            <div class="empty">
+                请输入关键词开始搜索
+            </div>
+        </div>
+    </div>
+    
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // 知识库数据缓存
+        let allDataCache = [];
+        let lastFetchTime = 0;
+        const CACHE_DURATION = 40 * 60 * 1000; // 40分钟
+        
+        // 配置信息
+        const APP_KEY = "b8b10a3f09b6274e59423ba63638d17d";
+        const appSecret = "9B2A089C8C9945E6AE4EC2ED71E2F8F2";
+        
+        // DOM 元素
+        const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const results = document.getElementById('results');
+        const toast = document.getElementById('toast');
+        
+	// 初始化企业微信 SDK
+async function initWWSDK() {
+    try {
+        // 获取当前页面URL（不包含锚点）
+        const url = window.location.href.split('#')[0];
+        
+        // 生成随机字符串
+        const nonceStr = Math.random().toString(36).substr(2, 15);
+        
+        // 获取当前时间戳
+        const timestamp = Date.now();
+        
+        // 调用我们的API获取签名
+        const response = await fetch('/api/signature', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                url: url,
+                noncestr: nonceStr,
+                timestamp: timestamp
+            })
+        });
+        
+        // 检查响应是否成功
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        // 解析响应数据
+        const signData = await response.json();
+        
+        // 使用获取到的签名数据初始化企业微信SDK
+        wx.agentConfig({
+            beta: true,
+            debug: false, // 上线时改为 false，开发时可以设为 true 查看错误
+            appId: signData.appId,
+            timestamp: signData.timestamp,
+            nonceStr: signData.noncestr,
+            signature: signData.signature,
+            jsApiList: [
+                'sendChatMessage',
+                'getCurExternalChat'
+            ]
+        });
+        
+        console.log('企业微信SDK初始化成功');
+        
+    } catch (error) {
+        console.error('初始化企业微信SDK失败:', error);
+        // 即使签名失败，用户仍然可以使用复制功能
+        showToast('企业微信功能初始化失败，只能使用复制功能');
+    }
+}
+        
+        // SHA1 加密
+        async function sha1(str) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(str);
+            const hashBuffer = await crypto.subtle.digest('SHA-1', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+        
+        // MD5 加密
+        async function md5(str) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(str);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+        
+        // 获取知识库数据
+        async function fetchAllKnowledge() {
+            let allData = [];
+            let mid = 0;
+            let isEnd = 0;
+            const size = 1000;
+            
+            try {
+                while (isEnd === 0) {
+                    const requestBody = { mid, size };
+                    const jsonString = JSON.stringify(requestBody);
+                    const md5Hash = await md5(jsonString);
+                    const timestamp = Math.floor(Date.now() / 1000);
+                    const checksumStr = appSecret + md5Hash + timestamp;
+                    const checksum = await sha1(checksumStr);
+                    
+                    const response = await fetch(
+                        `https://qiyukf.com/openapi/robot/data/knowledge?appKey=${APP_KEY}&time=${timestamp}&checksum=${checksum}`,
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'charset': 'UTF-8',
+                            },
+                            body: jsonString
+                        }
+                    );
+                    
+                    const result = await response.json();
+                    let message;
+                    
+                    if (typeof result.message === 'string') {
+                        try {
+                            message = JSON.parse(result.message);
+                        } catch (e) {
+                            console.error('message 不是合法 JSON:', result.message);
+                            break;
+                        }
+                    } else {
+                        message = result.message;
+                    }
+                    
+                    allData = allData.concat(message.data);
+                    isEnd = message.isEnd;
+                    
+                    if (message.data.length > 0) {
+                        mid = message.data[message.data.length - 1].id;
+                    } else {
+                        break;
+                    }
+                }
+                
+                // 更新缓存
+                lastFetchTime = Date.now();
+                allDataCache = allData;
+                localStorage.setItem('knowledgeData', JSON.stringify(allData));
+                localStorage.setItem('lastFetchTime', lastFetchTime.toString());
+                
+                return allData;
+            } catch (error) {
+                console.error('获取知识库数据失败:', error);
+                throw error;
+            }
+        }
+        
+        // 从缓存获取数据
+        function getCachedData() {
+            try {
+                const cachedData = localStorage.getItem('knowledgeData');
+                const cachedTime = localStorage.getItem('lastFetchTime');
+                
+                if (cachedData && cachedTime) {
+                    const timeDiff = Date.now() - parseInt(cachedTime);
+                    if (timeDiff < CACHE_DURATION) {
+                        allDataCache = JSON.parse(cachedData);
+                        lastFetchTime = parseInt(cachedTime);
+                        return JSON.parse(cachedData);
+                    }
+                }
+                return null;
+            } catch (error) {
+                console.error('获取缓存数据失败:', error);
+                return null;
+            }
+        }
+        
+        // 模糊匹配算法
+        function fuzzyMatch(userQuestion, allQAs) {
+            userQuestion = userQuestion.trim();
+            let results = [];
+            
+            // 1. 优先精确匹配和包含匹配
+            for (const qa of allQAs) {
+                if (userQuestion.includes(qa.question) || qa.question.includes(userQuestion)) {
+                    results.push({ ...qa, score: 1.0, matchType: 'exact' });
+                }
+            }
+            
+            if (results.length > 0) {
+                return results.slice(0, 5); // 返回前5个精确匹配
+            }
+            
+            // 2. 字符匹配评分
+            for (const qa of allQAs) {
+                let score = 0;
+                const questionChars = qa.question.split('');
+                const userChars = userQuestion.split('');
+                
+                for (const char of userChars) {
+                    if (questionChars.includes(char)) {
+                        score++;
+                    }
+                }
+                
+                const normalizedScore = score / Math.max(userChars.length, questionChars.length);
+                
+                if (normalizedScore > 0.3) {
+                    results.push({ ...qa, score: normalizedScore, matchType: 'fuzzy' });
+                }
+            }
+            
+            // 按评分排序并返回前5个
+            return results
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 5);
+        }
+        
+        // 显示搜索结果
+        function displayResults(searchResults) {
+            if (!searchResults || searchResults.length === 0) {
+                results.innerHTML = '<div class="empty">未找到相关内容</div>';
+                return;
+            }
+            
+            const resultsHTML = searchResults.map(item => `
+                <div class="result-item">
+                    <div class="result-content">${item.answer}</div>
+                    <div class="actions">
+                        <button class="action-btn" onclick="copyToClipboard('${item.answer.replace(/'/g, "\\'")}')">
+                            复制
+                        </button>
+                        <button class="action-btn send-btn" onclick="sendMessage('${item.answer.replace(/'/g, "\\'")}')">
+                            发送
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            
+            results.innerHTML = resultsHTML;
+        }
+        
+        // 显示提示信息
+        function showToast(message) {
+            toast.textContent = message;
+            toast.style.display = 'block';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 2000);
+        }
+        
+        // 复制到剪贴板
+        async function copyToClipboard(text) {
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('已复制到剪贴板');
+            } catch (err) {
+                // 备用方案
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showToast('已复制到剪贴板');
+            }
+        }
+        
+        // 发送消息到企业微信
+        function sendMessage(message) {
+            try {
+                wx.invoke('sendChatMessage', {
+                    msgtype: 'text',
+                    text: {
+                        content: message
+                    }
+                }, function(res) {
+                    if (res.err_msg === 'sendChatMessage:ok') {
+                        showToast('消息已发送');
+                    } else {
+                        showToast('发送失败，请手动复制');
+                        copyToClipboard(message);
+                    }
+                });
+            } catch (error) {
+                console.error('发送消息失败:', error);
+                showToast('发送失败，已复制到剪贴板');
+                copyToClipboard(message);
+            }
+        }
+        
+        // 搜索处理
+        async function handleSearch() {
+            const query = searchInput.value.trim();
+            
+            if (!query) {
+                showToast('请输入搜索关键词');
+                return;
+            }
+            
+            // 显示加载状态
+            searchBtn.disabled = true;
+            searchBtn.textContent = '搜索中...';
+            results.innerHTML = '<div class="loading">正在搜索...</div>';
+            
+            try {
+                // 检查缓存
+                let knowledgeData = getCachedData();
+                
+                // 如果没有缓存或缓存过期，重新获取
+                if (!knowledgeData || knowledgeData.length === 0) {
+                    knowledgeData = await fetchAllKnowledge();
+                }
+                
+                // 执行搜索
+                const searchResults = fuzzyMatch(query, knowledgeData);
+                
+                // 显示结果
+                displayResults(searchResults);
+                
+            } catch (error) {
+                console.error('搜索失败:', error);
+                results.innerHTML = '<div class="error">搜索失败，请稍后重试</div>';
+            } finally {
+                searchBtn.disabled = false;
+                searchBtn.textContent = '搜索';
+            }
+        }
+        
+        // 事件监听
+        searchBtn.addEventListener('click', handleSearch);
+        
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                handleSearch();
+            }
+        });
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initWWSDK();
+            
+            // 预加载缓存数据
+            getCachedData();
+        });
+    </script>
+</body>
+</html>
