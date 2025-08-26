@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="ww-domain-verification" content="2WEsGL45g8Ay3riX" />
+    <title>知识库查询</title>
+    <script src="https://wwopen.openstorage.cn/res/js/1.0.0/wwSdk.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+        }
+        
+        .header {
+            background: #07c160;
+            color: white;
+            padding: 16px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .search-box {
+            padding: 16px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        
+        .search-input:focus {
+            border-color: #07c160;
+        }
+        
+        .search-btn {
+            width: 100%;
+            margin-top: 8px;
+            padding: 12px;
+            background: #07c160;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .search-btn:hover {
+            background: #06ad56;
+        }
+        
+        .search-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .results {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+        
+        .result-item {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            position: relative;
+            border: 1px solid #e9ecef;
+        }
+        
+        .result-content {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+            word-wrap: break-word;
+            margin-bottom: 12px;
+        }
+        
+        .actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        
+        .action-btn {
+            padding: 6px 12px;
+            border: 1px solid #07c160;
+            background: white;
+            color: #07c160;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .action-btn:hover {
+            background: #07c160;
+            color: white;
+        }
+        
+        .send-btn {
+            background: #07c160;
+            color: white;
+        }
+        
+        .send-btn:hover {
+            background: #06ad56;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+        
+        .error {
+            background: #fff2f0;
+            border: 1px solid #ffccc7;
+            color: #ff4d4f;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 10px 16px;
+        }
+        
+        .toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            z-index: 1000;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            知识库查询
+        </div>
+        
+        <div class="search-box">
+            <input 
+                type="text" 
+                class="search-input" 
+                placeholder="请输入您要查询的问题..."
+                id="searchInput"
+            >
+            <button class="search-btn" id="searchBtn">搜索</button>
+        </div>
+        
+        <div class="results" id="results">
+            <div class="empty">
+                请输入关键词开始搜索
+            </div>
+        </div>
+    </div>
+    
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // 知识库数据缓存
+        let allDataCache = [];
+        let lastFetchTime = 0;
+        const CACHE_DURATION = 40 * 60 * 1000; // 40分钟
+        
+        // 七鱼API配置信息
+        const APP_KEY = "b8b10a3f09b6274e59423ba63638d17d";
+        const appSecret = "9B2A089C8C9945E6AE4EC2ED71E2F8F2";
+        
+        // DOM 元素
+        const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const results = document.getElementById('results');
+        const toast = document.getElementById('toast');
+        
+        // 初始化企业微信 SDK
+        async function initWWSDK() {
+            try {
+                const url = window.location.href.split('#')[0];
+                const nonceStr = Math.random().toString(36).substr(2, 15);
+                const timestamp = Date.now();
+                
+                // 从 Vercel API 获取签名
+                const response = await fetch('/api/signature', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url,
+                        noncestr: nonceStr,
+                        timestamp
+                    })
+                });
+                
+                const signData = await response.json();
+                
+                wx.agentConfig({
+                    beta: true,
+                    debug: false,
+                    appId: signData.appId,
+                    timestamp: signData.timestamp,
+                    nonceStr: signData.noncestr,
+                    signature: signData.signature,
+                    jsApiList: [
+                        'sendChatMessage',
+                        'getCurExternalChat'
+                    ]
+                });
+            } catch (error) {
+                console.error('初始化企业微信SDK失败:', error);
+                // 如果签名失败，仍然可以使用基本功能（复制）
+                showToast('企业微信功能初始化失败，只能使用复制功能');
+            }
+        }
+        
+        // 显示搜索结果
+        function displayResults(searchResults) {
+            if (!searchResults || searchResults.length === 0) {
+                results.innerHTML = '<div class="empty">未找到相关内容</div>';
+                return;
+            }
+            
+            const resultsHTML = searchResults.map(item => `
+                <div class="result-item">
+                    <div class="result-content">${item.answer}</div>
+                    <div class="actions">
+                        <button class="action-btn" onclick="copyToClipboard('${item.answer.replace(/'/g, "\\'")}')">
+                            复制
+                        </button>
+                        <button class="action-btn send-btn" onclick="sendMessage('${item.answer.replace(/'/g, "\\'")}')">
+                            发送
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            
+            results.innerHTML = resultsHTML;
+        }
+        
+        // 显示提示信息
+        function showToast(message) {
+            toast.textContent = message;
+            toast.style.display = 'block';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 2000);
+        }
+        
+        // 复制到剪贴板
+        async function copyToClipboard(text) {
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('已复制到剪贴板');
+            } catch (err) {
+                // 备用方案
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showToast('已复制到剪贴板');
+            }
+        }
+        
+        // 发送消息到企业微信（带降级处理）
+        function sendMessage(message) {
+            try {
+                // 检查企业微信SDK是否可用
+                if (typeof wx === 'undefined' || !wx.invoke) {
+                    // SDK不可用，直接复制
+                    copyToClipboard(message);
+                    return;
+                }
+                
+                wx.invoke('sendChatMessage', {
+                    msgtype: 'text',
+                    text: {
+                        content: message
+                    }
+                }, function(res) {
+                    if (res.err_msg === 'sendChatMessage:ok') {
+                        showToast('消息已发送');
+                    } else {
+                        console.log('发送失败，原因：', res);
+                        showToast('发送失败，已复制到剪贴板');
+                        copyToClipboard(message);
+                    }
+                });
+            } catch (error) {
+                console.error('发送消息失败:', error);
+                showToast('发送失败，已复制到剪贴板');
+                copyToClipboard(message);
+            }
+        }
+        
+        // 搜索处理（调用后端API）
+        async function handleSearch() {
+            const query = searchInput.value.trim();
+            
+            if (!query) {
+                showToast('请输入搜索关键词');
+                return;
+            }
+            
+            // 显示加载状态
+            searchBtn.disabled = true;
+            searchBtn.textContent = '搜索中...';
+            results.innerHTML = '<div class="loading">正在搜索...</div>';
+            
+            try {
+                console.log('开始搜索:', query);
+                
+                // 调用后端搜索API
+                const response = await fetch('/api/knowledge', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('搜索请求失败:', response.status, errorText);
+                    throw new Error(`搜索请求失败: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log('搜索结果:', result);
+                
+                if (!result.success) {
+                    throw new Error(result.error || '搜索失败');
+                }
+                
+                // 显示搜索结果
+                if (result.results && result.results.length > 0) {
+                    displayResults(result.results);
+                    showToast(`找到 ${result.results.length} 条相关结果`);
+                } else {
+                    results.innerHTML = '<div class="empty">未找到相关内容，请尝试其他关键词</div>';
+                    showToast('未找到相关内容');
+                }
+                
+            } catch (error) {
+                console.error('搜索失败:', error);
+                
+                // 显示错误信息，但提供测试数据
+                const testResults = [
+                    { 
+                        question: "如何重置密码", 
+                        answer: "请联系管理员重置密码，或者通过邮箱找回功能进行重置。步骤：1. 点击忘记密码 2. 输入邮箱 3. 查收邮件 4. 按照邮件指示重置",
+                        score: 0.9,
+                        matchType: 'test'
+                    },
+                    { 
+                        question: "系统维护时间", 
+                        answer: "系统维护时间为每周日凌晨2:00-4:00，请合理安排使用时间。维护期间系统暂停服务，请提前保存工作内容。",
+                        score: 0.8,
+                        matchType: 'test'
+                    },
+                    { 
+                        question: "联系客服", 
+                        answer: "客服热线：400-123-4567，工作时间：周一至周五 9:00-18:00。也可以通过在线客服或发送邮件到 service@example.com 联系我们。",
+                        score: 0.7,
+                        matchType: 'test'
+                    }
+                ].filter(item => 
+                    item.question.includes(query) || 
+                    item.answer.includes(query) ||
+                    query.includes('密码') || 
+                    query.includes('维护') || 
+                    query.includes('客服')
+                );
+                
+                if (testResults.length > 0) {
+                    displayResults(testResults);
+                    showToast(`API暂时不可用，显示测试数据 (${testResults.length} 条)`);
+                } else {
+                    results.innerHTML = `
+                        <div class="error">
+                            <p>搜索服务暂时不可用</p>
+                            <p>错误信息: ${error.message}</p>
+                            <p>请检查：</p>
+                            <ul style="text-align: left; margin: 10px 0; padding-left: 20px;">
+                                <li>网络连接是否正常</li>
+                                <li>七鱼API配置是否正确</li>
+                                <li>服务器日志中的详细错误</li>
+                            </ul>
+                        </div>
+                    `;
+                }
+            } finally {
+                searchBtn.disabled = false;
+                searchBtn.textContent = '搜索';
+            }
+        }
+        
+        // 事件监听
+        searchBtn.addEventListener('click', handleSearch);
+        
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                handleSearch();
+            }
+        });
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initWWSDK();
+            
+            // 预加载缓存数据
+            getCachedData();
+        });
+    </script>
+</body>
+</html>
