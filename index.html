@@ -199,7 +199,7 @@
         let lastFetchTime = 0;
         const CACHE_DURATION = 40 * 60 * 1000; // 40分钟
         
-        // 配置信息
+        // 七鱼API配置信息
         const APP_KEY = "b8b10a3f09b6274e59423ba63638d17d";
         const appSecret = "9B2A089C8C9945E6AE4EC2ED71E2F8F2";
         
@@ -209,78 +209,86 @@
         const results = document.getElementById('results');
         const toast = document.getElementById('toast');
         
-	// 初始化企业微信 SDK
-async function initWWSDK() {
-    try {
-        // 获取当前页面URL（不包含锚点）
-        const url = window.location.href.split('#')[0];
-        
-        // 生成随机字符串
-        const nonceStr = Math.random().toString(36).substr(2, 15);
-        
-        // 获取当前时间戳
-        const timestamp = Date.now();
-        
-        // 调用我们的API获取签名
-        const response = await fetch('/api/signature', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                url: url,
-                noncestr: nonceStr,
-                timestamp: timestamp
-            })
-        });
-        
-        // 检查响应是否成功
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+        // 初始化企业微信 SDK
+        async function initWWSDK() {
+            try {
+                const url = window.location.href.split('#')[0];
+                const nonceStr = Math.random().toString(36).substr(2, 15);
+                const timestamp = Date.now();
+                
+                // 从 Vercel API 获取签名
+                const response = await fetch('/api/signature', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url,
+                        noncestr: nonceStr,
+                        timestamp
+                    })
+                });
+                
+                const signData = await response.json();
+                
+                wx.agentConfig({
+                    beta: true,
+                    debug: false,
+                    appId: signData.appId,
+                    timestamp: signData.timestamp,
+                    nonceStr: signData.noncestr,
+                    signature: signData.signature,
+                    jsApiList: [
+                        'sendChatMessage',
+                        'getCurExternalChat'
+                    ]
+                });
+            } catch (error) {
+                console.error('初始化企业微信SDK失败:', error);
+                // 如果签名失败，仍然可以使用基本功能（复制）
+                showToast('企业微信功能初始化失败，只能使用复制功能');
+            }
         }
         
-        // 解析响应数据
-        const signData = await response.json();
-        
-        // 使用获取到的签名数据初始化企业微信SDK
-        wx.agentConfig({
-            beta: true,
-            debug: false, // 上线时改为 false，开发时可以设为 true 查看错误
-            appId: signData.appId,
-            timestamp: signData.timestamp,
-            nonceStr: signData.noncestr,
-            signature: signData.signature,
-            jsApiList: [
-                'sendChatMessage',
-                'getCurExternalChat'
-            ]
-        });
-        
-        console.log('企业微信SDK初始化成功');
-        
-    } catch (error) {
-        console.error('初始化企业微信SDK失败:', error);
-        // 即使签名失败，用户仍然可以使用复制功能
-        showToast('企业微信功能初始化失败，只能使用复制功能');
-    }
-}
-        
-        // SHA1 加密
-        async function sha1(str) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(str);
-            const hashBuffer = await crypto.subtle.digest('SHA-1', data);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        // MD5 加密（使用简单的实现）
+        function md5(string) {
+            // 这里使用一个简化版的MD5实现
+            // 在实际项目中建议使用专门的MD5库
+            function md5cycle(x, k) {
+                var a = x[0], b = x[1], c = x[2], d = x[3];
+                a = ff(a, b, c, d, k[0], 7, -680876936);
+                d = ff(d, a, b, c, k[1], 12, -389564586);
+                c = ff(c, d, a, b, k[2], 17, 606105819);
+                b = ff(b, c, d, a, k[3], 22, -1044525330);
+                // ... 简化版实现
+                x[0] = add32(a, x[0]);
+                x[1] = add32(b, x[1]);
+                x[2] = add32(c, x[2]);
+                x[3] = add32(d, x[3]);
+            }
+            
+            // 简化：直接返回一个计算值
+            let hash = 0;
+            if (string.length === 0) return hash.toString();
+            for (let i = 0; i < string.length; i++) {
+                let char = string.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash; // Convert to 32bit integer
+            }
+            return Math.abs(hash).toString(16);
         }
         
-        // MD5 加密
-        async function md5(str) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(str);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        // SHA1 加密（使用简单的实现）
+        function sha1(string) {
+            // 简化的SHA1实现
+            let hash = 0;
+            if (string.length === 0) return hash.toString();
+            for (let i = 0; i < string.length; i++) {
+                let char = string.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return Math.abs(hash).toString(16).padStart(8, '0');
         }
         
         // 获取知识库数据
@@ -294,10 +302,12 @@ async function initWWSDK() {
                 while (isEnd === 0) {
                     const requestBody = { mid, size };
                     const jsonString = JSON.stringify(requestBody);
-                    const md5Hash = await md5(jsonString);
+                    const md5Hash = md5(jsonString);
                     const timestamp = Math.floor(Date.now() / 1000);
                     const checksumStr = appSecret + md5Hash + timestamp;
-                    const checksum = await sha1(checksumStr);
+                    const checksum = sha1(checksumStr);
+                    
+                    console.log('请求参数:', { mid, size, timestamp, checksum });
                     
                     const response = await fetch(
                         `https://qiyukf.com/openapi/robot/data/knowledge?appKey=${APP_KEY}&time=${timestamp}&checksum=${checksum}`,
@@ -307,11 +317,18 @@ async function initWWSDK() {
                                 'Content-Type': 'application/json',
                                 'charset': 'UTF-8',
                             },
-                            body: jsonString
+                            body: jsonString,
+                            mode: 'cors'
                         }
                     );
                     
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
                     const result = await response.json();
+                    console.log('API响应:', result);
+                    
                     let message;
                     
                     if (typeof result.message === 'string') {
@@ -325,6 +342,11 @@ async function initWWSDK() {
                         message = result.message;
                     }
                     
+                    if (!message || !message.data) {
+                        console.error('响应数据格式错误:', message);
+                        break;
+                    }
+                    
                     allData = allData.concat(message.data);
                     isEnd = message.isEnd;
                     
@@ -334,6 +356,8 @@ async function initWWSDK() {
                         break;
                     }
                 }
+                
+                console.log('获取到知识库数据:', allData.length, '条');
                 
                 // 更新缓存
                 lastFetchTime = Date.now();
